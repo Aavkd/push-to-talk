@@ -1,0 +1,42 @@
+[project]
+name = "voix-vers-clavier"
+version = "0.1.0"
+description = "Dictée vocale locale Windows : voix → texte injecté au curseur (Whisper GPU, 100% local)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "MANTARA" }]
+
+# Dépendances volontairement découpées par phase de la roadmap.
+# Phase 0 n'a besoin que du cœur transcription + config.
+dependencies = [
+    # --- Phase 0 : transcription GPU + config ---
+    "faster-whisper>=1.1.0",   # STT local via CTranslate2 (CUDA float16)
+    "nvidia-cublas-cu12",      # runtime CUDA requis par CTranslate2 sur GPU
+    "nvidia-cudnn-cu12",       # cuDNN requis par CTranslate2 sur GPU
+    # tomllib (lecture TOML) est dans la stdlib depuis Python 3.11.
+    # tomli-w sert à réécrire la config depuis la future fenêtre de paramètres.
+    "tomli-w>=1.0.0",
+    # --- Phase 1 : capture micro + injection presse-papiers ---
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "pyperclip>=1.8.2",
+    # --- Phase 2 : raccourci global ---
+    "pynput>=1.7.6",
+]
+
+[project.optional-dependencies]
+# Activées au fur et à mesure des phases suivantes ; listées ici pour mémoire.
+ui = ["pystray>=0.19", "Pillow>=10.0", "PySide6>=6.6"]  # Phases 4-6 : systray + pilule + paramètres
+
+[project.scripts]
+voix-clavier-transcribe = "voix_clavier.cli:main"
+voix-clavier-dictate = "voix_clavier.dictate:main"
+voix-clavier = "voix_clavier.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

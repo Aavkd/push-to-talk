@@ -1,0 +1,22 @@
+# Dépendances — installation rapide sans build du package.
+# Équivalent au [project].dependencies de pyproject.toml (Phase 0).
+# Les dépendances des phases ultérieures sont commentées : décommenter au besoin.
+
+# --- Phase 0 : transcription GPU + config ---
+faster-whisper>=1.1.0
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+tomli-w>=1.0.0
+
+# --- Phase 1 : capture micro + injection presse-papiers ---
+sounddevice>=0.4.6
+numpy>=1.24
+pyperclip>=1.8.2
+
+# --- Phase 2 : raccourci global ---
+pynput>=1.7.6
+
+# --- Phases 4-6 : UI (systray, pilule, paramètres) ---
+# pystray>=0.19
+# Pillow>=10.0
+# PySide6>=6.6
