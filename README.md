@@ -171,8 +171,8 @@ pilule pour « Quitter » (même sans icône systray).
 
 Réglages dans `config.toml`, section `[interface]` :
 
-- `variante_pilule` : seule `"D"` est implémentée (A/B/C différées, mais le
-  sélecteur et le point d'extension existent) ;
+- `variante_pilule` : `"D"` (pilule complète, défaut), `"A"` (barre minimale),
+  `"B"` (forme d'onde) ou `"C"` (badge circulaire ~50×50) ; changeable à chaud ;
 - `position_pilule` : ancrage par défaut (`bas-droite`, `bas-gauche`,
   `haut-droite`, `haut-gauche`, `centre`).
 

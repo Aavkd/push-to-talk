@@ -10,11 +10,17 @@ en temps réel la machine à états de la dictée (Phase 2) :
 - **transcription**  : fond bleu plein + spinner rotatif + « traitement… » ;
 - **erreur**         : fond orange bref avant retour au repos.
 
-Architecture interchangeable (décision arrêtée de la roadmap) : seule la
-**variante D (pilule complète)** est implémentée, mais le rendu est dispatché par
-identifiant de variante (:data:`PILL_VARIANTS`) et la fabrique :func:`make_pill`
-lit ``config.variante_pilule``. Les variantes A, B et C sont différées : leur
-point d'extension (une méthode de peinture dédiée) est prévu mais non réalisé.
+Architecture interchangeable : le rendu est dispatché par identifiant de variante
+(:data:`PILL_VARIANTS`) et la fabrique :func:`make_pill` lit
+``config.variante_pilule``. Les quatre variantes des wireframes sont réalisées :
+
+- **D** — pilule complète (par défaut) : aplats pleins, timer + waveform ;
+- **A** — barre minimale : point coloré + libellé, point rouge pulsé en écoute ;
+- **B** — forme d'onde : micro + barres réagissant au volume + spinner ;
+- **C** — badge circulaire ~50×50 : anneau coloré + halo pulsé, anneau tournant.
+
+Chaque variante a sa propre géométrie (:data:`_VARIANT_SIZES`) ; changer de
+variante à chaud redimensionne et repositionne la fenêtre.
 
 Threading : la machine à états notifie depuis les threads du moteur (écoute
 clavier, worker de transcription). :class:`FloatingPill` reçoit ces transitions
@@ -30,7 +36,7 @@ import time
 from collections import deque
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -43,12 +49,26 @@ from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from ..state import State
 
-# --- Palette (reprise de la Section 1 des wireframes, variante D) ----------- #
+# --- Palette (reprise de la Section 1 des wireframes) ----------------------- #
 _RED = QColor("#ee0033")        # écoute
 _BLUE = QColor("#2266ee")       # transcription
 _ORANGE = QColor("#ee8800")     # erreur
 _GREY = QColor("#bbbbbb")       # repos (contour + texte)
 _WHITE = QColor("#ffffff")
+
+# Fond « fantôme » du repos, repris de la variante D : quasi transparent pour ne
+# jamais éblouir (les fonds pastel clairs sont proscrits — ils sont surexposés en
+# HDR). Les états actifs utilisent des aplats pleins saturés + contenu blanc.
+_GHOST_BG = QColor(248, 247, 244, 36)
+
+# Géométrie de la fenêtre selon la variante. A/B/D sont des barres, C un badge
+# circulaire compact (« ~50×50px » dans les wireframes).
+_VARIANT_SIZES: dict[str, tuple[int, int]] = {
+    "A": (150, 40),
+    "B": (210, 48),
+    "C": (52, 52),
+    "D": (210, 48),
+}
 
 # Nombre de barres de la waveform et fenêtre d'historique des niveaux.
 _WAVE_BARS = 7
@@ -120,10 +140,15 @@ class FloatingPill(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.setFixedSize(210, 48)
+        self._apply_variant_size()
         self.setWindowTitle("Voix → Clavier")
         # Police « manuscrite » des wireframes si disponible, sinon repli système.
         self._font = QFont("Segoe UI", 11, QFont.DemiBold)
+
+    def _apply_variant_size(self) -> None:
+        """Fixe la taille de la fenêtre selon la variante courante."""
+        w, h = _VARIANT_SIZES.get(self._variant, _VARIANT_SIZES["D"])
+        self.setFixedSize(w, h)
 
     # ------------------------------------------------------------------ #
     # Positionnement (anchor par défaut + override de glisser persistant)
@@ -189,14 +214,17 @@ class FloatingPill(QWidget):
         self.move(self._anchor_position())
 
     def set_variant(self, variant: str) -> None:
-        """Change la variante de pilule (réglage Phase 6).
+        """Change la variante de pilule à chaud (réglage Phase 6).
 
-        Décision arrêtée : seule D est réalisée ; A/B/C retombent sur D. Le point
-        d'extension reste prêt — il suffira d'enregistrer leur peinture dans
-        :data:`PILL_VARIANTS`.
+        Chaque variante a sa propre géométrie : on redimensionne la fenêtre puis
+        on la repositionne (la position glissée mémorisée est conservée si elle
+        reste visible, sinon on retombe sur l'ancrage). Une variante inconnue
+        retombe proprement sur D.
         """
         v = (variant or "D").strip().upper()
         self._variant = v if v in PILL_VARIANTS else "D"
+        self._apply_variant_size()
+        self._restore_position()
         self.update()
 
     # ------------------------------------------------------------------ #
@@ -287,6 +315,144 @@ class FloatingPill(QWidget):
             self._paint_filled(p, rect, radius, _ORANGE, "erreur", icon="warn")
         else:  # REPOS
             self._paint_idle(p, rect, radius)
+
+    # ================================================================== #
+    # Variante A — barre minimale (point coloré + libellé)
+    #
+    # Même traitement colorimétrique que D (validé en HDR) : repos « fantôme »
+    # quasi transparent, états actifs en aplat plein saturé + contenu blanc.
+    # ================================================================== #
+    def _paint_variant_a(self, p: QPainter) -> None:
+        rect = QRectF(1.5, 1.5, self.width() - 3, self.height() - 3)
+        radius = rect.height() / 2
+        cy = rect.center().y()
+        x = rect.left() + 16
+        if self._state is State.ECOUTE:
+            self._fill_pill(p, rect, radius, _RED)
+            self._draw_state_dot(p, x, cy, _WHITE, pulsing=True)
+            self._draw_label(p, rect, x + 16, "écoute…", _WHITE)
+        elif self._state in (State.TRANSCRIPTION, State.INJECTION):
+            self._fill_pill(p, rect, radius, _BLUE)
+            self._draw_state_dot(p, x, cy, _WHITE)
+            self._draw_label(p, rect, x + 16, "traitement…", _WHITE)
+        elif self._state is State.ERREUR:
+            self._fill_pill(p, rect, radius, _ORANGE)
+            self._draw_state_dot(p, x, cy, _WHITE)
+            self._draw_label(p, rect, x + 16, "erreur", _WHITE)
+        else:  # REPOS
+            self._ghost_pill(p, rect, radius)
+            self._draw_state_dot(p, x, cy, _GREY)
+            self._draw_label(p, rect, x + 16, "prêt", _GREY)
+
+    # ================================================================== #
+    # Variante B — forme d'onde (micro + barres + spinner)
+    # ================================================================== #
+    def _paint_variant_b(self, p: QPainter) -> None:
+        rect = QRectF(1.5, 1.5, self.width() - 3, self.height() - 3)
+        radius = rect.height() / 2
+        cy = rect.center().y()
+        x = rect.left() + 16
+        wf_x = x + 22
+        if self._state is State.ECOUTE:
+            self._fill_pill(p, rect, radius, _RED)
+            self._draw_mic(p, x, cy, _WHITE, size=14)
+            self._draw_waveform(p, wf_x, cy, rect.right() - 14 - wf_x)
+        elif self._state in (State.TRANSCRIPTION, State.INJECTION):
+            self._fill_pill(p, rect, radius, _BLUE)
+            self._draw_spinner(p, x + 6, cy, 7.0)
+            self._draw_label(p, rect, x + 24, "traitement…", _WHITE)
+        elif self._state is State.ERREUR:
+            self._fill_pill(p, rect, radius, _ORANGE)
+            self._draw_warning(p, x, cy, _WHITE)
+            self._draw_label(p, rect, x + 22, "erreur", _WHITE)
+        else:  # REPOS — vague plate = silence
+            self._ghost_pill(p, rect, radius)
+            self._draw_mic(p, x, cy, _GREY, size=14)
+            self._draw_waveform(p, wf_x, cy, rect.right() - 14 - wf_x, _GREY, flat=True)
+
+    # ================================================================== #
+    # Variante C — badge circulaire ~50×50 (anneau + halo / spinner)
+    # ================================================================== #
+    def _paint_variant_c(self, p: QPainter) -> None:
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        ring_r = min(self.width(), self.height()) / 2.0 - 4.0
+        rect = QRectF(cx - ring_r, cy - ring_r, ring_r * 2, ring_r * 2)
+
+        def disc(bg: QColor) -> None:
+            p.setPen(Qt.NoPen)
+            p.setBrush(bg)
+            p.drawEllipse(rect)
+
+        if self._state is State.ECOUTE:
+            # Halo pulsé autour du badge rouge plein.
+            pulse = 0.5 + 0.5 * math.sin(self._pulse_phase)
+            halo = QColor(_RED)
+            halo.setAlphaF(0.25 + 0.25 * pulse)
+            p.setPen(QPen(halo, 3.0))
+            p.setBrush(Qt.NoBrush)
+            hr = ring_r + 3.0 + 2.0 * pulse
+            p.drawEllipse(QPointF(cx, cy), hr, hr)
+            disc(_RED)
+            self._draw_mic(p, cx - 18 * 0.21, cy, _WHITE, size=18)
+        elif self._state in (State.TRANSCRIPTION, State.INJECTION):
+            # Badge bleu plein + anneau blanc tournant (épouse le bord).
+            disc(_BLUE)
+            self._draw_spinner(p, cx, cy, ring_r - 1.5, _WHITE, width=2.5)
+        elif self._state is State.ERREUR:
+            disc(_ORANGE)
+            self._draw_warning(p, cx - 7, cy, _WHITE)
+        else:  # REPOS — badge fantôme, anneau pointillé gris
+            disc(_GHOST_BG)
+            p.setPen(QPen(_GREY, 1.5, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(rect)
+            self._draw_mic(p, cx - 18 * 0.21, cy, _GREY, size=18)
+
+    # --- helpers partagés des variantes --------------------------------- #
+    def _fill_pill(
+        self, p: QPainter, rect: QRectF, radius: float, color: QColor
+    ) -> None:
+        """Aplat plein saturé (état actif) — sûr en HDR, contenu blanc par-dessus."""
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        p.fillPath(path, color)
+
+    def _ghost_pill(self, p: QPainter, rect: QRectF, radius: float) -> None:
+        """Capsule « fantôme » du repos : fond quasi transparent + contour pointillé."""
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        p.fillPath(path, _GHOST_BG)
+        p.setPen(QPen(_GREY, 1.5, Qt.DashLine))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+
+    def _draw_state_dot(
+        self, p: QPainter, x: float, cy: float, color: QColor, *, pulsing: bool = False
+    ) -> None:
+        r = 4.5
+        if pulsing:
+            pulse = 0.5 + 0.5 * math.sin(self._pulse_phase)
+            halo = QColor(color)
+            halo.setAlphaF(0.22 + 0.28 * pulse)
+            p.setPen(Qt.NoPen)
+            p.setBrush(halo)
+            hr = r + 2.0 + 2.0 * pulse
+            p.drawEllipse(QPointF(x, cy), hr, hr)
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawEllipse(QPointF(x, cy), r, r)
+
+    def _draw_label(
+        self, p: QPainter, rect: QRectF, x: float, text: str, color: QColor
+    ) -> None:
+        p.setPen(color)
+        p.setFont(self._font)
+        p.drawText(
+            QRectF(x, rect.top(), rect.right() - x, rect.height()),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            text,
+        )
 
     # --- états ---------------------------------------------------------- #
     def _paint_idle(self, p: QPainter, rect: QRectF, radius: float) -> None:
@@ -397,7 +563,10 @@ class FloatingPill(QWidget):
             QPoint(int(cx + s * 0.22), int(cy + s * 0.55)),
         )
 
-    def _draw_waveform(self, p: QPainter, x: float, cy: float, width: float) -> None:
+    def _draw_waveform(
+        self, p: QPainter, x: float, cy: float, width: float,
+        color: QColor | None = None, *, flat: bool = False,
+    ) -> None:
         if width <= 0:
             return
         bars = list(self._levels)
@@ -406,20 +575,27 @@ class FloatingPill(QWidget):
         bar_w = max(2.0, (width - gap * (n - 1)) / n)
         max_h = self.height() * 0.5
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 200))
+        p.setBrush(color or QColor(255, 255, 255, 200))
         bx = x
         for lvl in bars:
-            h = max(3.0, lvl * max_h)
+            h = 3.0 if flat else max(3.0, lvl * max_h)
             p.drawRoundedRect(QRectF(bx, cy - h / 2, bar_w, h), 1.5, 1.5)
             bx += bar_w + gap
 
-    def _draw_spinner(self, p: QPainter, x: float, cy: float, radius: float) -> None:
+    def _draw_spinner(
+        self, p: QPainter, x: float, cy: float, radius: float,
+        color: QColor = _WHITE, *, width: float = 2.2,
+    ) -> None:
         rect = QRectF(x - radius, cy - radius, radius * 2, radius * 2)
         # Anneau de fond ténu.
-        p.setPen(QPen(QColor(255, 255, 255, 70), 2.2))
+        faint = QColor(color)
+        faint.setAlpha(70)
+        p.setPen(QPen(faint, width))
         p.drawArc(rect, 0, 360 * 16)
         # Arc mobile.
-        p.setPen(QPen(QColor(255, 255, 255, 235), 2.2, Qt.SolidLine, Qt.RoundCap))
+        strong = QColor(color)
+        strong.setAlpha(235)
+        p.setPen(QPen(strong, width, Qt.SolidLine, Qt.RoundCap))
         start = int(-self._spinner_angle * 16)
         p.drawArc(rect, start, 100 * 16)
 
@@ -448,14 +624,13 @@ class FloatingPill(QWidget):
         self.close()
 
 
-# Dispatch de rendu par variante. Décision arrêtée : seule D est réalisée ;
-# A, B et C sont différées mais le point d'extension (une fonction de peinture
-# par variante) est prévu — il suffira d'ajouter l'entrée correspondante.
+# Dispatch de rendu par variante (Section 1 des wireframes). Les quatre variantes
+# sont réalisées ; chacune a sa peinture dédiée et sa géométrie (_VARIANT_SIZES).
 PILL_VARIANTS: dict[str, Callable[["FloatingPill", QPainter], None]] = {
+    "A": FloatingPill._paint_variant_a,
+    "B": FloatingPill._paint_variant_b,
+    "C": FloatingPill._paint_variant_c,
     "D": FloatingPill._paint_variant_d,
-    # "A": FloatingPill._paint_variant_a,  # différée
-    # "B": FloatingPill._paint_variant_b,  # différée
-    # "C": FloatingPill._paint_variant_c,  # différée
 }
 
 

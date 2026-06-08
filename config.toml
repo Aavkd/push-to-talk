@@ -15,8 +15,8 @@ peripherique = ""
 delai_restauration_ms = 80
 
 [interface]
-variante_pilule = "D"
-position_pilule = "bas-droite"
+variante_pilule = "C"
+position_pilule = "centre"
 
 [demarrage]
 lancer_au_demarrage = false

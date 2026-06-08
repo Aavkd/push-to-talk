@@ -83,9 +83,9 @@ _LANGUAGES: list[tuple[str, str]] = [
 ]
 _VARIANTS: list[tuple[str, str]] = [
     ("D", "Variante D — pilule complète"),
-    ("A", "Variante A — barre minimale (différée)"),
-    ("B", "Variante B — forme d'onde (différée)"),
-    ("C", "Variante C — badge circulaire (différée)"),
+    ("A", "Variante A — barre minimale"),
+    ("B", "Variante B — forme d'onde"),
+    ("C", "Variante C — badge circulaire"),
 ]
 _POSITIONS: list[tuple[str, str]] = [
     ("bas-droite", "Bas-droite"),
