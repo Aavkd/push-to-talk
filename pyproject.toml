@@ -31,6 +31,19 @@ dependencies = [
     "Pillow>=10.0",
     # --- Phase 5 : pilule flottante always-on-top (variante D) ---
     "PySide6>=6.6",
+    # --- Phase 8 : téléchargement du modèle au 1er lancement (retour visuel) ---
+    # huggingface_hub et tqdm sont des dépendances transitives de faster-whisper ;
+    # on les épingle explicitement car la Phase 8 les utilise directement
+    # (voix_clavier.models) pour piloter le téléchargement et sa progression.
+    "huggingface_hub>=0.20",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+# Outils de développement / packaging (non requis à l'exécution).
+dev = [
+    "pyinstaller>=6.0",   # Phase 8 : exécutable Windows
+    "pytest>=8.0",        # Phase 8 : tests d'intégration
 ]
 
 [project.scripts]
@@ -39,6 +52,7 @@ voix-clavier-dictate = "voix_clavier.dictate:main"
 voix-clavier = "voix_clavier.app:main"
 voix-clavier-selftest = "voix_clavier.selftest:main"
 voix-clavier-autostart = "voix_clavier.autostart:main"
+voix-clavier-doctor = "voix_clavier.doctor:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -46,3 +60,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Permet d'importer le package sans installation (les tests d'intégration
+# Phase 8 tournent sans GPU ni micro).
+pythonpath = ["src"]
+testpaths = ["tests"]

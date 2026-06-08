@@ -93,12 +93,19 @@ class Transcriber:
 
         from faster_whisper import WhisperModel
 
+        from . import paths
+
+        # Packagé (Phase 8) : dirige le cache modèle vers le dossier de données
+        # utilisateur ; en dev, ``None`` conserve le cache Hugging Face habituel.
+        cache_dir = paths.model_cache_dir()
+        cache_kwargs = {"download_root": str(cache_dir)} if cache_dir is not None else {}
+
         last_exc: Exception | None = None
         for model_name, device, compute_type, reason in self._fallback_chain():
             t0 = time.perf_counter()
             try:
                 self._model = WhisperModel(
-                    model_name, device=device, compute_type=compute_type
+                    model_name, device=device, compute_type=compute_type, **cache_kwargs
                 )
             except Exception as exc:  # noqa: BLE001 - on tente le candidat suivant
                 last_exc = exc

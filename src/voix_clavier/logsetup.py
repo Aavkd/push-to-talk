@@ -19,10 +19,11 @@ dossier ``logs/`` à la racine du projet.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+from . import paths
 
 _LOGGER_NAME = "voix_clavier"
 _configured = False
@@ -32,12 +33,15 @@ _DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 
 def log_dir() -> Path:
-    """Répertoire des journaux (créé à la demande par :func:`setup_logging`)."""
+    """Répertoire des journaux (créé à la demande par :func:`setup_logging`).
+
+    Sous le dossier de données utilisateur inscriptible (``%LOCALAPPDATA%``
+    sous Windows), partagé avec la config et le cache modèle — voir
+    :mod:`voix_clavier.paths`. Repli dev sur ``logs/`` à la racine du projet.
+    """
     if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        if base:
-            return Path(base) / "VoixClavier" / "logs"
-    return Path(__file__).resolve().parents[2] / "logs"
+        return paths.user_data_dir() / "logs"
+    return paths.project_root() / "logs"
 
 
 def log_file() -> Path:

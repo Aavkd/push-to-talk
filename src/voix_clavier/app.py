@@ -148,6 +148,64 @@ def _make_reload_handler(engine: DictationEngine):
     return on_reload
 
 
+def _console_download_progress(label: str, frac: float | None) -> None:
+    """Affiche l'avancement du téléchargement du modèle en console (une ligne).
+
+    No-op si pas de console (application packagée avec console=False).
+    """
+    if sys.stdout is None:
+        return
+    if frac is None:
+        sys.stdout.write(f"\r[modèle] {label}…                    ")
+    else:
+        bar_len = 24
+        filled = int(frac * bar_len)
+        bar = "█" * filled + "·" * (bar_len - filled)
+        sys.stdout.write(f"\r[modèle] {label} [{bar}] {frac * 100:5.1f}%   ")
+    sys.stdout.flush()
+    if frac is not None and frac >= 1.0:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
+def _preflight_model(config: Config, args: argparse.Namespace) -> None:
+    """Garantit la présence du modèle avant le chargement, avec retour visuel (Phase 8).
+
+    No-op si le modèle est déjà en cache. Sinon : fenêtre Qt de progression quand
+    la pilule est active (cas d'une installation packagée sans console), repli sur
+    une barre de progression console. Tout échec est non bloquant — le chargement
+    du moteur retentera puis appliquera sa chaîne de repli.
+    """
+    from . import models, paths
+
+    cache_dir = paths.model_cache_dir()
+    try:
+        if models.is_model_cached(config.modele, cache_dir):
+            return
+    except Exception:  # noqa: BLE001 - backend transcription absent : on laisse start() gérer
+        return
+
+    print(f"[modèle] « {config.modele} » absent du cache — téléchargement (premier lancement)…")
+
+    # Fenêtre Qt si la pilule est prévue et disponible (meilleur retour visuel,
+    # notamment sans console). La QApplication créée ici est réutilisée ensuite.
+    if not args.no_pill:
+        try:
+            from .ui.download import ensure_model_with_dialog
+
+            if ensure_model_with_dialog(config):
+                return
+        except Exception as exc:  # noqa: BLE001 - on retombe sur la console
+            _log.warning("Fenêtre de téléchargement indisponible : %s", exc)
+
+    # Repli console.
+    try:
+        models.ensure_model(config.modele, cache_dir, progress=_console_download_progress)
+    except Exception as exc:  # noqa: BLE001 - non bloquant
+        _log.warning("Pré-téléchargement du modèle échoué : %s", exc)
+        print(f"[modèle] pré-téléchargement impossible ({exc!s}) — nouvelle tentative au chargement.")
+
+
 def _sync_autostart(config: Config) -> None:
     """Aligne le lancement au démarrage de Windows sur le réglage de config (Phase 7)."""
     if not autostart.is_supported():
@@ -188,6 +246,13 @@ def main(argv: list[str] | None = None) -> int:
         f"compute_type={config.compute_type} langue={config.langue or 'auto'} "
         f"micro={config.peripherique or 'défaut'}"
     )
+
+    # Pré-vol Phase 8 : au premier lancement, le modèle (~3 Go pour large-v3)
+    # doit être téléchargé. On le fait avec un retour visuel (fenêtre Qt si la
+    # pilule est active, sinon console) AVANT le chargement, pour que l'app ne
+    # paraisse pas figée. Best-effort : en cas d'échec, le chargement ci-dessous
+    # tentera lui-même le téléchargement puis le repli.
+    _preflight_model(config, args)
 
     engine = DictationEngine(config, beep=not args.no_beep)
     print("[modèle] chargement en cours…")

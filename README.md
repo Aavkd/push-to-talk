@@ -7,11 +7,14 @@ dans n'importe quelle application (interface IA, navigateur, éditeur…).
 Transcription via [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 (`large-v3`) sur GPU NVIDIA (CUDA / float16). Aucune donnée ne quitte la machine.
 
-> État actuel : **Phase 5** terminée (pilule flottante always-on-top, variante D).
-> Phases 0 à 4 également terminées (environnement/GPU/CLI ; cœur audio → texte →
-> injection ; raccourci global, machine à états, modes, config à chaud ;
-> robustesse presse-papiers/accents ; systray + icônes d'état + toasts).
-> Voir `voix-vers-clavier-roadmap.md` pour la suite.
+> État actuel : **Phase 8** terminée (packaging Windows PyInstaller ; téléchargement
+> du modèle au 1er lancement avec retour visuel ; chemins inscriptibles dès qu'il
+> est packagé ; diagnostic `doctor` + droits admin ; tests d'intégration ; guide
+> utilisateur `DOCS.md`). Phases 0 à 7 également terminées (environnement/GPU/CLI ;
+> cœur audio → texte → injection ; raccourci global, machine à états, modes, config
+> à chaud ; robustesse presse-papiers/accents ; systray + icônes d'état + toasts ;
+> pilule flottante ; fenêtre de paramètres ; démarrage Windows + repli GPU/CPU/VRAM
+> + journal). **Le guide utilisateur complet est dans [`DOCS.md`](DOCS.md).**
 
 ## Arborescence
 
@@ -33,11 +36,40 @@ Push to talk/
    ├─ watcher.py            # rechargement à chaud de la config     [Phase 2 ✓]
    ├─ clipboard.py          # presse-papiers Win32 (texte + binaire)[Phase 3 ✓]
    ├─ app.py                # application pilotée par le raccourci  [Phase 2+ ✓]
+   ├─ autostart.py          # lancement au démarrage de Windows     [Phase 7 ✓]
+   ├─ paths.py              # chemins inscriptibles (dev vs packagé)[Phase 8 ✓]
+   ├─ models.py             # téléchargement modèle + progression   [Phase 8 ✓]
+   ├─ doctor.py             # diagnostic + droits admin             [Phase 8 ✓]
    └─ ui/
       ├─ icons.py           # icônes d'état systray (Pillow)        [Phase 4 ✓]
       ├─ systray.py         # icône systray + menu + toasts         [Phase 4 ✓]
-      └─ pill.py            # pilule flottante always-on-top (D)    [Phase 5 ✓]
+      ├─ pill.py            # pilule flottante always-on-top (D)    [Phase 5 ✓]
+      ├─ settings.py        # fenêtre de paramètres (carte A)       [Phase 6 ✓]
+      └─ download.py        # progression du téléchargement (Qt)    [Phase 8 ✓]
+
+packaging/                  # PyInstaller (Phase 8)
+├─ voix-clavier.spec        # spécification de build (onedir)
+├─ entry.py                 # point d'entrée de l'exécutable
+├─ runtime_hook_cuda.py     # DLL CUDA trouvables dans l'archive
+└─ build.ps1                # script de build
+tests/                      # tests d'intégration (sans GPU ni micro)
 ```
+
+## Packaging Windows (Phase 8)
+
+```powershell
+.venv\Scripts\Activate.ps1
+pip install -e .[dev]        # PyInstaller + pytest
+pytest                       # tests d'intégration
+.\packaging\build.ps1        # → dist\VoixClavier\VoixClavier.exe
+```
+
+L'exécutable est un dossier **onedir** embarquant les dépendances natives
+(CTranslate2, CUDA/cuDNN, PyAV, PySide6). Le modèle `large-v3` (~3 Go) n'est
+**pas** embarqué : il est téléchargé au premier lancement avec une fenêtre de
+progression, puis mis en cache sous `%LOCALAPPDATA%\VoixClavier\models`. Voir
+[`DOCS.md`](DOCS.md) pour le guide utilisateur (réglages, droits admin,
+multi-écrans / Quest 3, diagnostic).
 
 ## Installation (Phase 0)
 

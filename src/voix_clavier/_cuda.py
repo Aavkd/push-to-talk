@@ -27,19 +27,38 @@ def ensure_cuda_dll_path() -> list[str]:
         return []
 
     added: list[str] = []
+
+    def _register(bin_dir: Path) -> None:
+        bin_str = str(bin_dir)
+        if not bin_dir.is_dir() or bin_str in added:
+            return
+        try:
+            os.add_dll_directory(bin_str)
+        except (OSError, FileNotFoundError):
+            return
+        if bin_str not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = bin_str + os.pathsep + os.environ.get("PATH", "")
+        added.append(bin_str)
+
+    # Application packagée (Phase 8) : les DLL CUDA/cuDNN sont embarquées dans
+    # l'archive (à la racine d'extraction et/ou sous ``nvidia/*/bin``).
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            root = Path(meipass)
+            _register(root)
+            nvidia_root = root / "nvidia"
+            if nvidia_root.is_dir():
+                for bin_dir in nvidia_root.glob("*/bin"):
+                    _register(bin_dir)
+
+    # Exécution depuis les sources : DLL fournies par les paquets pip nvidia-*-cu12.
     for site_dir in _site_packages_dirs():
         nvidia_root = site_dir / "nvidia"
         if not nvidia_root.is_dir():
             continue
         for bin_dir in nvidia_root.glob("*/bin"):
-            bin_str = str(bin_dir)
-            try:
-                os.add_dll_directory(bin_str)
-            except (OSError, FileNotFoundError):
-                continue
-            if bin_str not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = bin_str + os.pathsep + os.environ.get("PATH", "")
-            added.append(bin_str)
+            _register(bin_dir)
     return added
 
 

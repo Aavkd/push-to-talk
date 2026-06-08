@@ -15,15 +15,18 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any
 
+from . import paths
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - repli pour Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 
-# Emplacement par défaut du fichier de config : à la racine du projet, à côté
-# de ce package source. Ajustable lors du packaging (Phase 8).
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.toml"
+# Emplacement par défaut du fichier de config. En dev : à la racine du projet.
+# Packagé (Phase 8) : dans le dossier de données utilisateur inscriptible
+# (%LOCALAPPDATA%\VoixClavier), via :mod:`voix_clavier.paths`.
+DEFAULT_CONFIG_PATH = paths.config_path()
 
 
 @dataclass
@@ -86,7 +89,12 @@ def load_config(path: str | Path | None = None) -> Config:
     Si le fichier est absent, renvoie une :class:`Config` aux valeurs par
     défaut sans lever d'erreur (l'app reste lançable en Phase 0).
     """
-    cfg_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
+    if path is not None:
+        cfg_path = Path(path)
+    else:
+        # Packagé : crée le config.toml utilisateur depuis le modèle embarqué au
+        # premier lancement (no-op en dev). Renvoie le chemin effectif.
+        cfg_path = paths.seed_user_config()
     config = Config()
 
     if not cfg_path.exists():

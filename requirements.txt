@@ -22,3 +22,12 @@ Pillow>=10.0
 
 # --- Phase 5 : pilule flottante always-on-top (variante D) ---
 PySide6>=6.6
+
+# --- Phase 8 : téléchargement du modèle au 1er lancement (retour visuel) ---
+# Dépendances transitives de faster-whisper, épinglées car utilisées directement
+# par voix_clavier.models (téléchargement + progression).
+huggingface_hub>=0.20
+tqdm>=4.65
+
+# Packaging / tests (dev) : pip install pyinstaller pytest
+# (ou : pip install -e .[dev])
