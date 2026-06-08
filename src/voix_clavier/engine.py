@@ -31,11 +31,14 @@ from .audio import Recorder
 from .config import Config
 from .hotkey import GlobalHotkey
 from .injection import inject
+from .logsetup import get_logger
 from .state import LABELS, IllegalTransition, State, StateMachine
 from .transcription import Transcriber
 
 # Intervalle minimal entre deux activations en mode toggle (anti-rebond).
 _TOGGLE_DEBOUNCE_S = 0.30
+
+_log = get_logger("engine")
 
 
 def _beep(kind: str) -> None:
@@ -165,6 +168,7 @@ class DictationEngine:
             self._bip("start")
         except Exception as exc:  # noqa: BLE001 - micro indisponible, etc.
             print(f"  [erreur] micro : {exc!s}")
+            _log.exception("Échec du démarrage de la capture micro : %s", exc)
             self._bip("error")
             if self.on_mic_error is not None:
                 try:
@@ -181,6 +185,7 @@ class DictationEngine:
             audio = self.recorder.stop()
         except Exception as exc:  # noqa: BLE001
             print(f"  [erreur] arrêt capture : {exc!s}")
+            _log.exception("Échec de l'arrêt de la capture : %s", exc)
             self._bip("error")
             self.machine.to_error()
             self.machine.reset()
@@ -232,6 +237,7 @@ class DictationEngine:
             self.machine.to(State.REPOS)
         except Exception as exc:  # noqa: BLE001 - on revient toujours à Repos
             print(f"  [erreur] {exc!s}")
+            _log.exception("Échec du cycle transcription/collage : %s", exc)
             self._bip("error")
             self.machine.to_error()
             self.machine.reset()

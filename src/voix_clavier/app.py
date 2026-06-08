@@ -22,10 +22,14 @@ import argparse
 import sys
 import time
 
+from . import autostart
 from .audio import list_input_devices
 from .config import DEFAULT_CONFIG_PATH, Config, load_config
 from .engine import DictationEngine
+from .logsetup import get_logger, log_file, setup_logging
 from .watcher import ConfigWatcher
+
+_log = get_logger("app")
 
 # Champs applicables à chaud (mutation en place de l'objet Config partagé).
 _HOT_FIELDS = ("mode", "raccourci", "peripherique", "delai_restauration_ms", "langue")
@@ -33,8 +37,9 @@ _HOT_FIELDS = ("mode", "raccourci", "peripherique", "delai_restauration_ms", "la
 _RESTART_FIELDS = ("modele", "device", "compute_type")
 # Champs d'interface appliqués à chaud sur la pilule (Phase 5/6).
 _INTERFACE_FIELDS = ("variante_pilule", "position_pilule")
-# Champs de démarrage : persistés ; leur effet (registre Windows, systray) relève
-# de la Phase 7 / d'un redémarrage. La Phase 6 se contente de les enregistrer.
+# Champs de démarrage : persistés et appliqués (Phase 7). « lancer_au_demarrage »
+# pilote la clé de registre Run de Windows (voir :mod:`voix_clavier.autostart`) ;
+# « afficher_systray » prend effet au prochain lancement.
 _STARTUP_FIELDS = ("lancer_au_demarrage", "afficher_systray")
 
 
@@ -98,6 +103,16 @@ def _make_reload_handler(engine: DictationEngine):
 
     def on_reload(new: Config) -> None:
         current = engine.config
+
+        # Réglage de démarrage édité à la main dans config.toml : appliquer au
+        # registre Windows (Phase 7), même s'il ne fait pas partie des champs « à
+        # chaud » du moteur.
+        if new.lancer_au_demarrage != current.lancer_au_demarrage:
+            current.lancer_au_demarrage = new.lancer_au_demarrage
+            _sync_autostart(current)
+            print("[config] lancement au démarrage : "
+                  f"{'activé' if current.lancer_au_demarrage else 'désactivé'}.")
+
         changed = [
             f
             for f in (*_HOT_FIELDS, *_RESTART_FIELDS)
@@ -133,8 +148,20 @@ def _make_reload_handler(engine: DictationEngine):
     return on_reload
 
 
+def _sync_autostart(config: Config) -> None:
+    """Aligne le lancement au démarrage de Windows sur le réglage de config (Phase 7)."""
+    if not autostart.is_supported():
+        return
+    try:
+        autostart.sync(config.lancer_au_demarrage)
+    except Exception as exc:  # noqa: BLE001 - l'autostart ne doit jamais planter l'app
+        _log.warning("Synchronisation de l'autostart impossible : %s", exc)
+        print(f"[démarrage] réglage du lancement au démarrage impossible : {exc!s}")
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_console()
+    setup_logging()
     args = build_parser().parse_args(argv)
 
     if args.list_devices:
@@ -146,6 +173,14 @@ def main(argv: list[str] | None = None) -> int:
     config_path = args.config or DEFAULT_CONFIG_PATH
     config = load_config(args.config)
     _apply_overrides(config, args)
+    _log.info(
+        "Démarrage : mode=%s device=%s modèle=%s compute=%s langue=%s autostart=%s",
+        config.mode, config.device, config.modele, config.compute_type,
+        config.langue or "auto", config.lancer_au_demarrage,
+    )
+
+    # Aligne l'inscription au démarrage de Windows sur le réglage (Phase 6/7).
+    _sync_autostart(config)
 
     print(
         f"[config] mode={config.mode} raccourci={config.raccourci} "
@@ -156,7 +191,17 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = DictationEngine(config, beep=not args.no_beep)
     print("[modèle] chargement en cours…")
-    engine.start()
+    try:
+        engine.start()
+    except Exception as exc:  # noqa: BLE001 - aucun backend de transcription disponible
+        _log.exception("Démarrage impossible (chargement du modèle) : %s", exc)
+        print(
+            f"[erreur fatale] impossible de charger un modèle de transcription : {exc!s}\n"
+            f"               Vérifiez l'installation CUDA / les modèles disponibles.\n"
+            f"               Détails dans le journal : {log_file()}"
+        )
+        engine.stop()
+        return 1
 
     watcher: ConfigWatcher | None = None
     if not args.no_watch:
@@ -265,6 +310,9 @@ def _run_gui(engine: DictationEngine, config: Config, systray) -> bool:
                 pill.set_anchor(current.position_pilule)
             if "variante_pilule" in interface:
                 pill.set_variant(current.variante_pilule)
+            if "lancer_au_demarrage" in startup:
+                # Effet réel du réglage (Phase 7) : registre Run de Windows.
+                _sync_autostart(current)
 
             from .config import save_config
 

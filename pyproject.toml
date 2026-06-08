@@ -38,6 +38,7 @@ voix-clavier-transcribe = "voix_clavier.cli:main"
 voix-clavier-dictate = "voix_clavier.dictate:main"
 voix-clavier = "voix_clavier.app:main"
 voix-clavier-selftest = "voix_clavier.selftest:main"
+voix-clavier-autostart = "voix_clavier.autostart:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -219,18 +219,21 @@ class Systray:
             print(f"[systray] notification indisponible : {exc!s} ({title} — {message})")
 
     def notify_ready(self) -> None:
-        """Toast de démarrage réussi (ou de repli si GPU absent)."""
+        """Toast de démarrage réussi (ou de repli GPU/VRAM/CPU, Phase 7)."""
         loaded = self.engine.transcriber.loaded_with
         if loaded is None:
             self.notify("Voix → Clavier prêt", "Modèle chargé.")
             return
         model, device, _compute = loaded
-        requested = (self.engine.config.device or "").strip().lower()
-        if requested == "cuda" and device == "cpu":
-            # Le chargement GPU a échoué : on a basculé sur CPU (repli Phase 7).
+        fallback = self.engine.transcriber.fallback
+        if fallback == "cpu":
+            # Le chargement GPU a entièrement échoué : bascule sur CPU léger.
+            self.notify("GPU introuvable", f"Repli sur CPU · modèle {model}")
+        elif fallback == "vram":
+            # Mémoire GPU insuffisante : repli int8_float16 (toujours sur GPU).
             self.notify(
-                "GPU introuvable",
-                f"Repli sur CPU · modèle {model}",
+                "Mémoire GPU insuffisante",
+                f"Repli int8_float16 · modèle {model}",
             )
         else:
             cible = "GPU" if device == "cuda" else "CPU"

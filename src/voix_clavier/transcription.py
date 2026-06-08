@@ -16,9 +16,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import Config
+from .logsetup import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
     import numpy as np
+
+_log = get_logger("transcription")
+
+# Modèle de repli CPU le plus léger (décision arrêtée de la roadmap : on part du
+# plus sûr — ``tiny`` — quitte à le réajuster après mesure). Utilisé seulement
+# quand le chargement GPU échoue entièrement.
+_CPU_FALLBACK_MODEL = "tiny"
 
 
 @dataclass
@@ -39,16 +47,44 @@ class Transcriber:
         self.config = config or Config()
         self._model = None  # type: ignore[var-annotated]
         self._loaded_with: tuple[str, str, str] | None = None
+        # Type de repli effectivement appliqué au chargement, pour que l'UI
+        # (toast systray) informe précisément : None (config demandée honorée),
+        # "vram" (float16 → int8_float16 sur GPU faute de mémoire), ou "cpu"
+        # (bascule complète GPU → CPU avec modèle léger).
+        self._fallback: str | None = None
 
     # ------------------------------------------------------------------ #
     # Chargement du modèle
     # ------------------------------------------------------------------ #
+    def _fallback_chain(self) -> list[tuple[str, str, str, str | None]]:
+        """Liste ordonnée de candidats ``(modèle, device, compute_type, repli)``.
+
+        On tente d'abord exactement ce que demande la config. En GPU, on prévoit
+        deux replis successifs (roadmap Phase 7) :
+
+        - **VRAM** : ``float16`` qui échoue faute de mémoire → ``int8_float16``
+          (même modèle, toujours sur GPU) ;
+        - **GPU → CPU** : si le GPU reste inutilisable → modèle léger ``tiny`` en
+          ``int8`` sur CPU, par sécurité.
+        """
+        model = self.config.modele
+        device = self.config.device
+        compute = self.config.compute_type
+
+        chain: list[tuple[str, str, str, str | None]] = [(model, device, compute, None)]
+        if device == "cuda":
+            if compute == "float16":
+                chain.append((model, "cuda", "int8_float16", "vram"))
+            chain.append((_CPU_FALLBACK_MODEL, "cpu", "int8", "cpu"))
+        return chain
+
     def load(self) -> None:
         """Charge le modèle Whisper en mémoire (coûteux ; appelé au démarrage).
 
-        Tente la config demandée (par défaut GPU/float16). En cas d'échec lié
-        à CUDA, effectue un repli minimal CPU/int8 et le journalise — le repli
-        complet (toasts, modèle léger) est l'affaire de la Phase 7.
+        Parcourt la chaîne de repli (:meth:`_fallback_chain`) : config demandée,
+        puis repli VRAM (``int8_float16``), puis repli CPU (modèle léger). Le
+        repli effectivement appliqué est exposé via :attr:`fallback` pour que le
+        systray notifie l'utilisateur. Lève si **aucun** backend ne charge.
         """
         # Rend cublas/cudnn trouvables sur Windows avant tout import natif.
         from ._cuda import ensure_cuda_dll_path
@@ -57,35 +93,48 @@ class Transcriber:
 
         from faster_whisper import WhisperModel
 
-        device = self.config.device
-        compute_type = self.config.compute_type
-        model_name = self.config.modele
-
-        t0 = time.perf_counter()
-        try:
-            self._model = WhisperModel(
-                model_name, device=device, compute_type=compute_type
-            )
-        except Exception as exc:  # noqa: BLE001 - repli volontairement large
-            if device == "cuda":
-                print(
-                    f"[transcription] Échec du chargement GPU ({exc!s}).\n"
-                    f"[transcription] Repli temporaire sur CPU (Phase 7 gérera "
-                    f"un repli propre avec modèle léger)."
-                )
-                device, compute_type = "cpu", "int8"
+        last_exc: Exception | None = None
+        for model_name, device, compute_type, reason in self._fallback_chain():
+            t0 = time.perf_counter()
+            try:
                 self._model = WhisperModel(
                     model_name, device=device, compute_type=compute_type
                 )
-            else:
-                raise
+            except Exception as exc:  # noqa: BLE001 - on tente le candidat suivant
+                last_exc = exc
+                _log.warning(
+                    "Chargement échoué (%s / %s / %s) : %s",
+                    model_name, device, compute_type, exc,
+                )
+                print(
+                    f"[transcription] Échec du chargement "
+                    f"{model_name}/{device}/{compute_type} : {exc!s}"
+                )
+                continue
 
-        self._loaded_with = (model_name, device, compute_type)
-        elapsed = time.perf_counter() - t0
-        print(
-            f"[transcription] Modèle '{model_name}' chargé sur {device} "
-            f"({compute_type}) en {elapsed:.1f}s."
-        )
+            self._loaded_with = (model_name, device, compute_type)
+            self._fallback = reason
+            elapsed = time.perf_counter() - t0
+            suffixe = {
+                "vram": " (repli VRAM : int8_float16)",
+                "cpu": " (repli CPU : GPU indisponible)",
+            }.get(reason or "", "")
+            _log.info(
+                "Modèle '%s' chargé sur %s (%s) en %.1fs%s",
+                model_name, device, compute_type, elapsed, suffixe,
+            )
+            print(
+                f"[transcription] Modèle '{model_name}' chargé sur {device} "
+                f"({compute_type}) en {elapsed:.1f}s.{suffixe}"
+            )
+            return
+
+        # Tous les candidats ont échoué : on ne peut pas transcrire.
+        _log.error("Aucun backend de transcription disponible : %s", last_exc)
+        raise RuntimeError(
+            f"Impossible de charger un modèle de transcription "
+            f"(dernier échec : {last_exc!s})."
+        ) from last_exc
 
     @property
     def is_loaded(self) -> bool:
@@ -95,6 +144,11 @@ class Transcriber:
     def loaded_with(self) -> tuple[str, str, str] | None:
         """(modèle, device, compute_type) effectivement utilisés."""
         return self._loaded_with
+
+    @property
+    def fallback(self) -> str | None:
+        """Repli appliqué au chargement : ``None``, ``"vram"`` ou ``"cpu"``."""
+        return self._fallback
 
     # ------------------------------------------------------------------ #
     # Transcription
