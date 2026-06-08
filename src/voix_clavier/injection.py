@@ -4,23 +4,34 @@ Flux design en 5 étapes (Section 3 des wireframes) qui garantit le rendu correc
 des accents français, contrairement à la frappe simulée caractère par caractère :
 
 1. Sauvegarder le presse-papiers courant.
-2. Écrire le texte transcrit dedans (``pyperclip``).
+2. Écrire le texte transcrit dedans.
 3. Simuler ``Ctrl+V``.
 4. Attendre ``delai_restauration_ms`` (~80 ms) pour que le collage soit pris en compte.
 5. Restaurer le presse-papiers original.
 
+Durcissements de la Phase 3 :
+
+- **Non-texte préservé** : la sauvegarde/restauration passe par :mod:`voix_clavier.clipboard`
+  (API Win32 native) et capture *tous* les formats — image, fichiers, HTML… — et
+  pas seulement le texte. Le contenu utilisateur n'est donc jamais corrompu.
+- **Accents** : le texte est écrit en ``CF_UNICODETEXT`` (UTF-16), donc é à ç œ
+  « » sont collés tels quels.
+- **Transcriptions vides** : rien n'est collé (silence / bruit).
+- **Enchaînement rapide** : un verrou sérialise les injections pour qu'une dictée
+  ne lise/écrase pas le presse-papiers d'une autre en cours de collage.
+
 Le ``Ctrl+V`` est simulé via l'API Win32 native ``SendInput`` (``ctypes``), sans
-dépendance supplémentaire. La cible étant exclusivement Windows, c'est fiable et
-cela évite de tirer ``pynput`` dès la Phase 1 (réservé au raccourci global, Phase 2).
+dépendance supplémentaire.
 """
 
 from __future__ import annotations
 
 import ctypes
+import threading
 import time
 from ctypes import wintypes
 
-import pyperclip
+from . import clipboard
 
 # --------------------------------------------------------------------------- #
 # Simulation Ctrl+V via Win32 SendInput
@@ -32,6 +43,10 @@ INPUT_KEYBOARD = 1
 
 # ULONG_PTR : entier de la taille d'un pointeur (8 octets en 64 bits).
 ULONG_PTR = ctypes.c_size_t
+
+# Sérialise les injections : deux dictées enchaînées rapidement ne doivent pas
+# lire/restaurer le presse-papiers en même temps (corruption d'état).
+_inject_lock = threading.Lock()
 
 
 class _MOUSEINPUT(ctypes.Structure):
@@ -100,34 +115,48 @@ def _send_ctrl_v() -> None:
 # --------------------------------------------------------------------------- #
 # Injection
 # --------------------------------------------------------------------------- #
-def inject(text: str, *, delai_restauration_ms: int = 80) -> None:
+def inject(text: str, *, delai_restauration_ms: int = 80, restore: bool = True) -> bool:
     """Colle ``text`` au curseur via le flux presse-papiers en 5 étapes.
 
-    Ne fait rien si ``text`` est vide (silence, bruit → rien à coller).
+    Args:
+        text: texte à coller. Vide → rien n'est collé (silence / bruit).
+        delai_restauration_ms: attente entre le collage simulé et la restauration
+            du presse-papiers d'origine. Trop court = collage manqué ; trop long
+            = latence perçue. Réglable dans ``config.toml``.
+        restore: si ``True``, restaure fidèlement le presse-papiers d'origine
+            (tous formats, texte comme non-texte) après le collage.
+
+    Returns:
+        ``True`` si un collage a été effectué, ``False`` si ``text`` était vide.
     """
     if not text:
-        return
+        return False
 
-    # 1. Sauvegarder le presse-papiers courant. La gestion du contenu non-texte
-    #    (images, fichiers) est l'affaire de la Phase 3 ; ici on capte le texte
-    #    et on tolère un échec de lecture sans planter.
-    try:
-        previous = pyperclip.paste()
-    except Exception:  # noqa: BLE001
-        previous = None
+    with _inject_lock:
+        # 1. Sauvegarder l'intégralité du presse-papiers (texte ET non-texte :
+        #    image, fichiers, HTML…). La capture est best-effort : si elle
+        #    échoue, on colle quand même mais sans pouvoir restaurer.
+        previous: dict[int, bytes] | None = None
+        if restore:
+            try:
+                previous = clipboard.snapshot()
+            except Exception:  # noqa: BLE001 - presse-papiers verrouillé, etc.
+                previous = None
 
-    # 2. Écrire le texte transcrit.
-    pyperclip.copy(text)
+        # 2. Écrire le texte transcrit (UTF-16 → accents corrects).
+        clipboard.set_text(text)
 
-    # 3. Simuler Ctrl+V.
-    _send_ctrl_v()
+        # 3. Simuler Ctrl+V.
+        _send_ctrl_v()
 
-    # 4. Laisser le temps à l'application cible de prendre en compte le collage.
-    time.sleep(max(0, delai_restauration_ms) / 1000.0)
+        # 4. Laisser le temps à l'application cible de prendre en compte le collage.
+        time.sleep(max(0, delai_restauration_ms) / 1000.0)
 
-    # 5. Restaurer le presse-papiers original.
-    if previous is not None:
-        try:
-            pyperclip.copy(previous)
-        except Exception:  # noqa: BLE001
-            pass
+        # 5. Restaurer le presse-papiers original (tous formats), best-effort.
+        if restore and previous is not None:
+            try:
+                clipboard.restore(previous)
+            except Exception:  # noqa: BLE001 - ne jamais planter sur la restauration
+                pass
+
+    return True

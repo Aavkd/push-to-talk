@@ -14,7 +14,7 @@
 # Mode de déclenchement de la dictée.
 #   "push-to-talk" : enregistre tant que la touche est maintenue, transcrit au relâchement.
 #   "toggle"       : un appui démarre, un second arrête et transcrit.
-mode = "toggle"
+mode = "push-to-talk"
 
 # Raccourci global qui déclenche la dictée (fonctionne quelle que soit la fenêtre active).
 raccourci = "ctrl+space"
@@ -45,7 +45,9 @@ peripherique = ""
 [presse_papiers]
 # Délai (en millisecondes) entre le collage simulé (Ctrl+V) et la restauration
 # du presse-papiers d'origine. Trop court = collage manqué ; trop long = latence.
-# Calé finement en Phase 3.
+# 80 ms convient à la plupart des applications ; augmentez (120-150) si certaines
+# fenêtres lentes ratent le collage. La restauration préserve tout le contenu
+# d'origine, y compris non-texte (image, fichiers copiés) — Phase 3.
 delai_restauration_ms = 80
 
 [interface]
