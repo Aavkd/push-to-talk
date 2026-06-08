@@ -91,6 +91,10 @@ class Systray:
         """Définit l'action « Quitter » (p. ex. arrêter la boucle Qt en Phase 5)."""
         self._on_quit = callback
 
+    def set_on_open_settings(self, callback: Callable[[], None]) -> None:
+        """Définit l'action « Paramètres… » (ouvre la fenêtre de la Phase 6)."""
+        self._on_open_settings = callback
+
     # ------------------------------------------------------------------ #
     # Construction du menu (variante Settings C)
     # ------------------------------------------------------------------ #

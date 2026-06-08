@@ -77,9 +77,11 @@ class FloatingPill(QWidget):
         anchor: str = "bas-droite",
         level_provider: Callable[[], float] | None = None,
         on_quit: Callable[[], None] | None = None,
+        on_settings: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(None)
         self._on_quit = on_quit
+        self._on_settings = on_settings
         self._variant = (variant or "D").strip().upper()
         if self._variant not in PILL_VARIANTS:
             # Variantes A/B/C différées : on retombe proprement sur D.
@@ -176,6 +178,27 @@ class FloatingPill(QWidget):
     def _save_position(self) -> None:
         self._settings.setValue("pill/pos", self.pos())
 
+    def set_anchor(self, anchor: str) -> None:
+        """Change le coin d'ancrage (réglage Phase 6) et y replace la pilule.
+
+        On efface la position glissée mémorisée pour que le nouvel ancrage
+        s'applique réellement (sinon le glisser précédent l'emporterait).
+        """
+        self._anchor = anchor
+        self._settings.remove("pill/pos")
+        self.move(self._anchor_position())
+
+    def set_variant(self, variant: str) -> None:
+        """Change la variante de pilule (réglage Phase 6).
+
+        Décision arrêtée : seule D est réalisée ; A/B/C retombent sur D. Le point
+        d'extension reste prêt — il suffira d'enregistrer leur peinture dans
+        :data:`PILL_VARIANTS`.
+        """
+        v = (variant or "D").strip().upper()
+        self._variant = v if v in PILL_VARIANTS else "D"
+        self.update()
+
     # ------------------------------------------------------------------ #
     # Glisser-déposer pour repositionner
     # ------------------------------------------------------------------ #
@@ -196,11 +219,16 @@ class FloatingPill(QWidget):
             event.accept()
 
     def contextMenuEvent(self, event) -> None:  # noqa: ANN001
-        """Menu clic-droit : permet de quitter même sans icône systray."""
+        """Menu clic-droit : paramètres (Phase 6) et « Quitter »."""
         menu = QMenu(self)
+        settings_action = menu.addAction("Paramètres…")
+        settings_action.setEnabled(self._on_settings is not None)
+        menu.addSeparator()
         quit_action = menu.addAction("Quitter")
         chosen = menu.exec(event.globalPos())
-        if chosen is quit_action and self._on_quit is not None:
+        if chosen is settings_action and self._on_settings is not None:
+            self._on_settings()
+        elif chosen is quit_action and self._on_quit is not None:
             self._on_quit()
 
     # ------------------------------------------------------------------ #
@@ -437,6 +465,7 @@ def make_pill(
     anchor: str = "bas-droite",
     level_provider: Callable[[], float] | None = None,
     on_quit: Callable[[], None] | None = None,
+    on_settings: Callable[[], None] | None = None,
 ) -> FloatingPill:
     """Fabrique la pilule pour la variante demandée (repli sur D si inconnue)."""
     return FloatingPill(
@@ -444,4 +473,5 @@ def make_pill(
         anchor=anchor,
         level_provider=level_provider,
         on_quit=on_quit,
+        on_settings=on_settings,
     )

@@ -31,6 +31,11 @@ from .watcher import ConfigWatcher
 _HOT_FIELDS = ("mode", "raccourci", "peripherique", "delai_restauration_ms", "langue")
 # Champs exigeant un redémarrage (rechargement du modèle Whisper).
 _RESTART_FIELDS = ("modele", "device", "compute_type")
+# Champs d'interface appliqués à chaud sur la pilule (Phase 5/6).
+_INTERFACE_FIELDS = ("variante_pilule", "position_pilule")
+# Champs de démarrage : persistés ; leur effet (registre Windows, systray) relève
+# de la Phase 7 / d'un redémarrage. La Phase 6 se contente de les enregistrer.
+_STARTUP_FIELDS = ("lancer_au_demarrage", "afficher_systray")
 
 
 def _force_utf8_console() -> None:
@@ -214,10 +219,11 @@ def _run_gui(engine: DictationEngine, config: Config, systray) -> bool:
     tourne en mode détaché pour cohabiter avec elle.
     """
     try:
-        from PySide6.QtCore import QMetaObject, Qt
+        from PySide6.QtCore import QMetaObject, QObject, Qt, Signal
         from PySide6.QtWidgets import QApplication
 
         from .ui.pill import make_pill
+        from .ui.settings import SettingsWindow
     except ImportError as exc:
         print(
             f"[pilule] dépendances UI absentes ({exc!s}) — pas de pilule. "
@@ -235,11 +241,81 @@ def _run_gui(engine: DictationEngine, config: Config, systray) -> bool:
         def request_quit() -> None:
             QMetaObject.invokeMethod(qapp, "quit", Qt.QueuedConnection)
 
+        # --- Fenêtre de paramètres (Phase 6) ------------------------------- #
+        # Prise en compte d'une config éditée : applique à chaud ce qui peut
+        # l'être (raccourci, mode, micro, langue, délai, pilule), persiste tout
+        # dans config.toml, et renvoie les champs exigeant un redémarrage.
+        def apply_config(new: Config) -> list[str]:
+            current = engine.config
+
+            def diff(fields: tuple[str, ...]) -> list[str]:
+                return [f for f in fields if getattr(new, f) != getattr(current, f)]
+
+            hot = diff(_HOT_FIELDS)
+            interface = diff(_INTERFACE_FIELDS)
+            startup = diff(_STARTUP_FIELDS)
+            restart = diff(_RESTART_FIELDS)
+
+            for field in (*hot, *interface, *startup, *restart):
+                setattr(current, field, getattr(new, field))
+
+            if "raccourci" in hot:
+                engine.reload_hotkey(current.raccourci)
+            if "position_pilule" in interface:
+                pill.set_anchor(current.position_pilule)
+            if "variante_pilule" in interface:
+                pill.set_variant(current.variante_pilule)
+
+            from .config import save_config
+
+            save_config(current)
+
+            applied = [*hot, *interface, *startup]
+            if applied:
+                print(f"[paramètres] appliqué à chaud : {', '.join(applied)}.")
+            if restart:
+                print(f"[paramètres] redémarrage requis pour : {', '.join(restart)}.")
+            return restart
+
+        # La fenêtre de paramètres est créée à la demande et gardée en vie tant
+        # qu'elle est ouverte (un seul exemplaire à la fois).
+        settings_win: dict[str, SettingsWindow | None] = {"w": None}
+
+        def open_settings() -> None:
+            existing = settings_win["w"]
+            if existing is not None and existing.isVisible():
+                existing.raise_()
+                existing.activateWindow()
+                return
+            try:
+                devices = list_input_devices()
+            except Exception:  # noqa: BLE001 - sans micro, on liste juste « défaut »
+                devices = []
+            win = SettingsWindow(
+                engine.config,
+                on_apply=apply_config,
+                devices=devices,
+                on_closed=lambda: settings_win.update(w=None),
+            )
+            settings_win["w"] = win
+            win.show()
+            win.raise_()
+            win.activateWindow()
+
+        # Pont thread-safe : le menu systray (autre thread) émet un signal qui est
+        # délivré sur le thread GUI, où l'on peut créer la fenêtre Qt sans risque.
+        class _GuiBridge(QObject):
+            open_settings_requested = Signal()
+
+        bridge = _GuiBridge()
+        bridge.open_settings_requested.connect(open_settings)
+
         pill = make_pill(
             config.variante_pilule,
             anchor=config.position_pilule,
             level_provider=lambda: engine.recorder.level,
             on_quit=request_quit,
+            on_settings=open_settings,  # menu de la pilule : déjà sur le thread GUI
         )
         # Suivre la machine à états en direct (notifié depuis les threads moteur ;
         # la pilule remarshale vers le thread GUI via un signal queued).
@@ -248,13 +324,15 @@ def _run_gui(engine: DictationEngine, config: Config, systray) -> bool:
         pill.show()
 
         if systray is not None:
-            # « Quitter » depuis le menu systray doit aussi arrêter la boucle Qt.
+            # « Quitter » et « Paramètres… » du menu systray doivent agir sur la
+            # boucle Qt (autre thread) : on passe par request_quit / le pont.
             systray.set_on_quit(request_quit)
+            systray.set_on_open_settings(bridge.open_settings_requested.emit)
             systray.notify_ready()
             systray.run_detached()  # cohabite avec la boucle Qt
-            print(" Pilule + systray actifs — clic droit (pilule ou icône) pour « Quitter ».")
+            print(" Pilule + systray actifs — clic droit (pilule ou icône) pour « Paramètres… » / « Quitter ».")
         else:
-            print(" Pilule active — clic droit sur la pilule pour « Quitter ».")
+            print(" Pilule active — clic droit sur la pilule pour « Paramètres… » / « Quitter ».")
     except Exception as exc:  # noqa: BLE001 - la pilule ne doit pas tuer l'app
         print(f"[pilule] initialisation impossible ({exc!s}) — repli sans pilule.")
         return False
