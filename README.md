@@ -7,10 +7,11 @@ dans n'importe quelle application (interface IA, navigateur, éditeur…).
 Transcription via [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 (`large-v3`) sur GPU NVIDIA (CUDA / float16). Aucune donnée ne quitte la machine.
 
-> État actuel : **Phase 2** terminée (raccourci global, machine à états, modes
-> push-to-talk / toggle, config rechargée à chaud).
-> Phases 0 et 1 (environnement/GPU/CLI, puis cœur audio → texte → injection)
-> également terminées. Voir `voix-vers-clavier-roadmap.md` pour la suite.
+> État actuel : **Phase 5** terminée (pilule flottante always-on-top, variante D).
+> Phases 0 à 4 également terminées (environnement/GPU/CLI ; cœur audio → texte →
+> injection ; raccourci global, machine à états, modes, config à chaud ;
+> robustesse presse-papiers/accents ; systray + icônes d'état + toasts).
+> Voir `voix-vers-clavier-roadmap.md` pour la suite.
 
 ## Arborescence
 
@@ -30,8 +31,12 @@ Push to talk/
    ├─ state.py              # machine à états explicite             [Phase 2 ✓]
    ├─ engine.py             # orchestration raccourci → dictée      [Phase 2 ✓]
    ├─ watcher.py            # rechargement à chaud de la config     [Phase 2 ✓]
-   ├─ app.py                # application pilotée par le raccourci  [Phase 2 ✓]
-   └─ ui/                   # systray / pilule / paramètres         [Phases 4-6]
+   ├─ clipboard.py          # presse-papiers Win32 (texte + binaire)[Phase 3 ✓]
+   ├─ app.py                # application pilotée par le raccourci  [Phase 2+ ✓]
+   └─ ui/
+      ├─ icons.py           # icônes d'état systray (Pillow)        [Phase 4 ✓]
+      ├─ systray.py         # icône systray + menu + toasts         [Phase 4 ✓]
+      └─ pill.py            # pilule flottante always-on-top (D)    [Phase 5 ✓]
 ```
 
 ## Installation (Phase 0)
@@ -138,3 +143,41 @@ redémarrage (le modèle Whisper est lourd à recharger) — un message le signa
 
 On bascule entre `push-to-talk` et `toggle` via le fichier de config, et chacun
 se comporte conformément aux deux diagrammes de la machine à états.
+
+## Utilisation (Phase 5 — pilule flottante)
+
+À partir de la Phase 5, `python -m voix_clavier.app` affiche une **pilule
+flottante** always-on-top (variante D, « pilule complète ») qui suit la machine à
+états en temps réel :
+
+- **repos** : pilule quasi-invisible (contour pointillé, micro gris) ;
+- **écoute** : fond rouge plein, **timer** d'enregistrement et **waveform**
+  réagissant au volume réel du micro ;
+- **transcription** : fond bleu plein, spinner + « traitement… ».
+
+```powershell
+pip install -r requirements.txt   # installe aussi PySide6
+
+python -m voix_clavier.app         # pilule + systray
+python -m voix_clavier.app --no-pill      # systray seul (Phase 4)
+python -m voix_clavier.app --no-pill --no-systray   # mode console
+```
+
+La pilule est **repositionnable par glisser** ; sa position est mémorisée et
+restaurée au lancement suivant. Sur un montage **multi-écrans** (y compris écran
+virtuel Quest 3), une position devenue hors-champ est ignorée au profit de
+l'ancrage par défaut — la pilule ne disparaît jamais. **Clic droit** sur la
+pilule pour « Quitter » (même sans icône systray).
+
+Réglages dans `config.toml`, section `[interface]` :
+
+- `variante_pilule` : seule `"D"` est implémentée (A/B/C différées, mais le
+  sélecteur et le point d'extension existent) ;
+- `position_pilule` : ancrage par défaut (`bas-droite`, `bas-gauche`,
+  `haut-droite`, `haut-gauche`, `centre`).
+
+### Critère de validation Phase 5
+
+La variante D affiche correctement les 3 états et suit la machine à états en
+temps réel (timer et waveform inclus) ; la pilule reste visible et
+repositionnable sur un setup multi-écrans.

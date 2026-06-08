@@ -87,6 +87,10 @@ class Systray:
         # S'abonner à la machine à états pour suivre les transitions en direct.
         engine.machine.subscribe(self._on_state_change)
 
+    def set_on_quit(self, callback: Callable[[], None]) -> None:
+        """Définit l'action « Quitter » (p. ex. arrêter la boucle Qt en Phase 5)."""
+        self._on_quit = callback
+
     # ------------------------------------------------------------------ #
     # Construction du menu (variante Settings C)
     # ------------------------------------------------------------------ #

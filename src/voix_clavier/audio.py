@@ -53,10 +53,20 @@ class Recorder:
         self._stream: sd.InputStream | None = None
         self._frames: list[np.ndarray] = []
         self._recording = False
+        # Niveau sonore instantané (RMS du dernier bloc, ~0.0 → 1.0). Lu par la
+        # pilule (Phase 5) pour animer la waveform en temps réel. L'affectation
+        # d'un float est atomique en CPython : pas de verrou nécessaire pour une
+        # lecture best-effort depuis le thread UI.
+        self._level = 0.0
 
     @property
     def is_recording(self) -> bool:
         return self._recording
+
+    @property
+    def level(self) -> float:
+        """Niveau sonore instantané (RMS du dernier bloc capté), 0.0 au repos."""
+        return self._level if self._recording else 0.0
 
     def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001
         # Appelé depuis le thread audio de PortAudio : rester léger, pas d'I/O.
@@ -64,6 +74,8 @@ class Recorder:
             # Surdébit / perte de blocs : on le note sans interrompre la capture.
             print(f"[audio] statut flux : {status}")
         self._frames.append(indata.copy())
+        # RMS du bloc pour le retour visuel temps réel de la pilule (Phase 5).
+        self._level = float(np.sqrt(np.mean(np.square(indata))))
 
     def start(self) -> None:
         """Démarre l'enregistrement (idempotent si déjà en cours)."""
@@ -94,6 +106,7 @@ class Recorder:
         self._stream.close()
         self._stream = None
         self._recording = False
+        self._level = 0.0
 
         if not self._frames:
             return np.zeros(0, dtype=np.float32)
@@ -114,3 +127,4 @@ class Recorder:
             self._stream = None
         self._frames = []
         self._recording = False
+        self._level = 0.0

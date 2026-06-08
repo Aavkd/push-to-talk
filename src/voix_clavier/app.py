@@ -63,6 +63,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force le mode console même si l'icône systray est activée dans la config.",
     )
     parser.add_argument(
+        "--no-pill", action="store_true",
+        help="Désactive la pilule flottante (Phase 5) même si les dépendances UI sont présentes.",
+    )
+    parser.add_argument(
         "--list-devices", action="store_true",
         help="Liste les périphériques d'entrée audio puis quitte.",
     )
@@ -161,22 +165,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     print()
     print("=" * 64)
-    print(" Voix → Clavier — Phase 4 (systray + icônes d'état + toasts)")
+    print(" Voix → Clavier — Phase 5 (pilule flottante always-on-top)")
     print(f" Raccourci : {config.raccourci}  ({mode_aide})")
     print(" Le texte se colle dans la fenêtre active, où que soit le curseur.")
     print("=" * 64)
 
     # Systray (Phase 4) : actif si demandé en config et non désactivé en ligne
-    # de commande. Il porte l'icône d'état, le menu et les toasts. En son
-    # absence (dépendances manquantes ou --no-systray), on retombe sur la
-    # boucle console des phases précédentes.
+    # de commande. Il porte l'icône d'état, le menu et les toasts.
     systray = None
     if config.afficher_systray and not args.no_systray:
         systray = _try_build_systray(engine)
 
+    if systray is not None:
+        engine.on_mic_error = systray.notify_mic_error
+
     try:
-        if systray is not None:
-            engine.on_mic_error = systray.notify_mic_error
+        # Pilule flottante (Phase 5) : si les dépendances Qt sont présentes et
+        # la pilule non désactivée, la boucle Qt tient le thread principal et le
+        # systray tourne en arrière-plan. Sinon, on retombe sur le systray seul
+        # (Phase 4), puis sur la boucle console.
+        if not args.no_pill and _run_gui(engine, config, systray):
+            pass
+        elif systray is not None:
             systray.notify_ready()
             print(" Icône systray active — clic droit pour le menu, « Quitter » pour fermer.")
             systray.run()  # bloquant jusqu'à « Quitter »
@@ -193,6 +203,67 @@ def main(argv: list[str] | None = None) -> int:
             watcher.stop()
         engine.stop()
     return 0
+
+
+def _run_gui(engine: DictationEngine, config: Config, systray) -> bool:
+    """Lance la boucle Qt avec la pilule flottante (Phase 5).
+
+    Renvoie ``True`` si la boucle GUI a tourné (et s'est terminée), ``False`` si
+    les dépendances Qt sont absentes — l'appelant retombe alors sur le systray
+    seul ou la console. La boucle Qt tient le thread principal ; le systray, lui,
+    tourne en mode détaché pour cohabiter avec elle.
+    """
+    try:
+        from PySide6.QtCore import QMetaObject, Qt
+        from PySide6.QtWidgets import QApplication
+
+        from .ui.pill import make_pill
+    except ImportError as exc:
+        print(
+            f"[pilule] dépendances UI absentes ({exc!s}) — pas de pilule. "
+            f"Installez-les avec : pip install PySide6"
+        )
+        return False
+
+    try:
+        qapp = QApplication.instance() or QApplication([])
+        # Ne pas quitter quand la pilule se ferme : c'est « Quitter » qui décide.
+        qapp.setQuitOnLastWindowClosed(False)
+
+        # Arrêt sûr depuis n'importe quel thread (le menu systray tourne sur le
+        # sien) : on poste le quit dans la boucle d'événements du thread GUI.
+        def request_quit() -> None:
+            QMetaObject.invokeMethod(qapp, "quit", Qt.QueuedConnection)
+
+        pill = make_pill(
+            config.variante_pilule,
+            anchor=config.position_pilule,
+            level_provider=lambda: engine.recorder.level,
+            on_quit=request_quit,
+        )
+        # Suivre la machine à états en direct (notifié depuis les threads moteur ;
+        # la pilule remarshale vers le thread GUI via un signal queued).
+        engine.machine.subscribe(lambda _old, new: pill.set_state(new))
+        pill.set_state(engine.machine.state)
+        pill.show()
+
+        if systray is not None:
+            # « Quitter » depuis le menu systray doit aussi arrêter la boucle Qt.
+            systray.set_on_quit(request_quit)
+            systray.notify_ready()
+            systray.run_detached()  # cohabite avec la boucle Qt
+            print(" Pilule + systray actifs — clic droit (pilule ou icône) pour « Quitter ».")
+        else:
+            print(" Pilule active — clic droit sur la pilule pour « Quitter ».")
+    except Exception as exc:  # noqa: BLE001 - la pilule ne doit pas tuer l'app
+        print(f"[pilule] initialisation impossible ({exc!s}) — repli sans pilule.")
+        return False
+
+    try:
+        qapp.exec()
+    finally:
+        pill.shutdown()
+    return True
 
 
 def _try_build_systray(engine: DictationEngine):

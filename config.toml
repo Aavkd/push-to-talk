@@ -1,66 +1,23 @@
-# =============================================================================
-#  Voix → Clavier — Fichier de configuration
-# =============================================================================
-#  Format TOML (décision arrêtée de la roadmap) : lisible, commentable,
-#  round-trip propre entre l'édition manuelle et la future fenêtre de paramètres.
-#
-#  Toutes les valeurs ci-dessous sont les valeurs PAR DÉFAUT. Vous pouvez les
-#  modifier à la main ; l'application les relit au démarrage ET à chaud pendant
-#  qu'elle tourne (mode, raccourci, micro, langue, délai presse-papiers sont
-#  appliqués immédiatement ; modèle/device/compute_type exigent un redémarrage).
-# =============================================================================
-
 [declenchement]
-# Mode de déclenchement de la dictée.
-#   "push-to-talk" : enregistre tant que la touche est maintenue, transcrit au relâchement.
-#   "toggle"       : un appui démarre, un second arrête et transcrit.
-mode = "push-to-talk"
-
-# Raccourci global qui déclenche la dictée (fonctionne quelle que soit la fenêtre active).
+mode = "toggle"
 raccourci = "ctrl+space"
 
 [transcription]
-# Modèle Whisper. Cible : "large-v3" (meilleure qualité, GPU requis).
-# Modèles de repli plus légers (CPU) : "small", "base", "tiny".
 modele = "large-v3"
-
-# Périphérique de calcul : "cuda" (GPU NVIDIA) ou "cpu".
 device = "cuda"
-
-# Type de calcul CTranslate2.
-#   GPU : "float16" (défaut), repli VRAM : "int8_float16".
-#   CPU : "int8".
 compute_type = "float16"
-
-# Langue de dictée. "fr" pour le français. Mettre "" (chaîne vide) ou "auto"
-# pour laisser Whisper auto-détecter la langue.
 langue = "fr"
 
 [micro]
-# Périphérique d'entrée audio.
-#   "" (chaîne vide) = périphérique d'entrée par défaut de Windows.
-#   Sinon, indiquer le nom ou l'index du périphérique (cf. sounddevice, Phase 1).
 peripherique = ""
 
 [presse_papiers]
-# Délai (en millisecondes) entre le collage simulé (Ctrl+V) et la restauration
-# du presse-papiers d'origine. Trop court = collage manqué ; trop long = latence.
-# 80 ms convient à la plupart des applications ; augmentez (120-150) si certaines
-# fenêtres lentes ratent le collage. La restauration préserve tout le contenu
-# d'origine, y compris non-texte (image, fichiers copiés) — Phase 3.
 delai_restauration_ms = 80
 
 [interface]
-# Variante de la pilule flottante (Phase 5). Seule "D" est implémentée pour
-# l'instant ; "A", "B", "C" sont différées mais le sélecteur existe.
 variante_pilule = "D"
-
-# Position de la pilule à l'écran (Phase 5).
 position_pilule = "bas-droite"
 
 [demarrage]
-# Lancer l'application au démarrage de Windows (Phase 7).
 lancer_au_demarrage = false
-
-# Afficher l'icône dans la zone de notification (systray) (Phase 4).
 afficher_systray = true

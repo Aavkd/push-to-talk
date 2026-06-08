@@ -20,5 +20,5 @@ pynput>=1.7.6
 pystray>=0.19
 Pillow>=10.0
 
-# --- Phases 5-6 : pilule flottante + fenêtre de paramètres ---
-# PySide6>=6.6
+# --- Phase 5 : pilule flottante always-on-top (variante D) ---
+PySide6>=6.6

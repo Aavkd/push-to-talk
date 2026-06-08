@@ -29,11 +29,9 @@ dependencies = [
     # --- Phase 4 : systray (icône d'état + menu + notifications toast) ---
     "pystray>=0.19",
     "Pillow>=10.0",
+    # --- Phase 5 : pilule flottante always-on-top (variante D) ---
+    "PySide6>=6.6",
 ]
-
-[project.optional-dependencies]
-# Activées au fur et à mesure des phases suivantes ; listées ici pour mémoire.
-ui = ["PySide6>=6.6"]  # Phases 5-6 : pilule flottante + fenêtre de paramètres
 
 [project.scripts]
 voix-clavier-transcribe = "voix_clavier.cli:main"
