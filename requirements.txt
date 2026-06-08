@@ -16,7 +16,9 @@ pyperclip>=1.8.2
 # --- Phase 2 : raccourci global ---
 pynput>=1.7.6
 
-# --- Phases 4-6 : UI (systray, pilule, paramètres) ---
-# pystray>=0.19
-# Pillow>=10.0
+# --- Phase 4 : systray (icône d'état + menu + notifications toast) ---
+pystray>=0.19
+Pillow>=10.0
+
+# --- Phases 5-6 : pilule flottante + fenêtre de paramètres ---
 # PySide6>=6.6

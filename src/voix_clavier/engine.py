@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Callable
 
 from .audio import Recorder
 from .config import Config
@@ -61,6 +62,7 @@ class DictationEngine:
         recorder: Recorder | None = None,
         beep: bool = True,
         verbose: bool = True,
+        on_mic_error: Callable[[str], None] | None = None,
     ) -> None:
         self.config = config
         self.transcriber = transcriber or Transcriber(config)
@@ -68,6 +70,10 @@ class DictationEngine:
         self.machine = StateMachine(on_change=self._on_state_change)
         self._beep_enabled = beep
         self._verbose = verbose
+        # Callback optionnel (UI) appelé quand la capture micro échoue ; sert au
+        # toast « Erreur micro » du systray (Phase 4). Le moteur reste utilisable
+        # sans UI : si None, on se contente du print/bip existants.
+        self.on_mic_error = on_mic_error
 
         self._hotkey: GlobalHotkey | None = None
         # Sérialise les décisions d'activation/désactivation (threads pynput).
@@ -160,6 +166,11 @@ class DictationEngine:
         except Exception as exc:  # noqa: BLE001 - micro indisponible, etc.
             print(f"  [erreur] micro : {exc!s}")
             self._bip("error")
+            if self.on_mic_error is not None:
+                try:
+                    self.on_mic_error(str(exc))
+                except Exception:  # noqa: BLE001 - le callback UI ne doit pas planter le moteur
+                    pass
             self.machine.to_error()
             self.recorder.abort()
             self.machine.reset()

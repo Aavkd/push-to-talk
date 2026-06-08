@@ -59,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-beep", action="store_true", help="Désactive les bips de feedback.")
     parser.add_argument("--no-watch", action="store_true", help="Désactive le rechargement à chaud de la config.")
     parser.add_argument(
+        "--no-systray", action="store_true",
+        help="Force le mode console même si l'icône systray est activée dans la config.",
+    )
+    parser.add_argument(
         "--list-devices", action="store_true",
         help="Liste les périphériques d'entrée audio puis quitte.",
     )
@@ -157,22 +161,59 @@ def main(argv: list[str] | None = None) -> int:
     )
     print()
     print("=" * 64)
-    print(" Voix → Clavier — Phase 2 (raccourci global + modes)")
+    print(" Voix → Clavier — Phase 4 (systray + icônes d'état + toasts)")
     print(f" Raccourci : {config.raccourci}  ({mode_aide})")
     print(" Le texte se colle dans la fenêtre active, où que soit le curseur.")
-    print(" Ctrl+C dans cette console pour quitter.")
     print("=" * 64)
 
+    # Systray (Phase 4) : actif si demandé en config et non désactivé en ligne
+    # de commande. Il porte l'icône d'état, le menu et les toasts. En son
+    # absence (dépendances manquantes ou --no-systray), on retombe sur la
+    # boucle console des phases précédentes.
+    systray = None
+    if config.afficher_systray and not args.no_systray:
+        systray = _try_build_systray(engine)
+
     try:
-        while True:
-            time.sleep(0.5)
+        if systray is not None:
+            engine.on_mic_error = systray.notify_mic_error
+            systray.notify_ready()
+            print(" Icône systray active — clic droit pour le menu, « Quitter » pour fermer.")
+            systray.run()  # bloquant jusqu'à « Quitter »
+        else:
+            print(" Mode console — Ctrl+C dans cette console pour quitter.")
+            while True:
+                time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nArrêt.")
     finally:
+        if systray is not None:
+            systray.stop()
         if watcher is not None:
             watcher.stop()
         engine.stop()
     return 0
+
+
+def _try_build_systray(engine: DictationEngine):
+    """Construit le systray si les dépendances UI sont présentes, sinon ``None``.
+
+    L'import est différé (et toléré en échec) pour que l'application reste
+    lançable en mode console quand ``pystray`` / ``Pillow`` ne sont pas installés.
+    """
+    try:
+        from .ui.systray import Systray
+    except ImportError as exc:
+        print(
+            f"[systray] dépendances UI absentes ({exc!s}) — mode console. "
+            f"Installez-les avec : pip install pystray Pillow"
+        )
+        return None
+    try:
+        return Systray(engine)
+    except Exception as exc:  # noqa: BLE001 - le systray ne doit pas empêcher de dicter
+        print(f"[systray] initialisation impossible ({exc!s}) — mode console.")
+        return None
 
 
 if __name__ == "__main__":
